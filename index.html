@@ -1299,6 +1299,14 @@ function setEmotion(emotion){
   else if(emotion==='sleepy')speak(P.sleepyResponses[Math.floor(Math.random()*P.sleepyResponses.length)],4000);
   else if(emotion==='surprised')speak('واو! إيه اللي مفاجأك؟ 😮',3000);
   else if(emotion==='away')speak('ارجع للشاشة! أنا بتوحشني 🥺',3000);
+  // Personal name responses
+  if(typeof UserDB!=='undefined'){
+    const uName=UserDB.get('name');
+    if(uName){
+      const pm={happy:`شايف إنك مبسوط يا ${uName}! 🎉`,sad:`متضيقش يا ${uName} 💪`,sleepy:`تعبان يا ${uName}؟ 😴`};
+      if(pm[emotion]&&emotion!==S._lastPersonalEmotion){S._lastPersonalEmotion=emotion;setTimeout(()=>speak(pm[emotion],4000),3200);}
+    }
+  }
 }
 function updateMirror(exp){
   if(!S.mirrorMode||!exp)return;
@@ -1474,6 +1482,14 @@ function stopRecognition(){
   ['vw1','vw2','vw3','vw4','vw5'].forEach(id=>$(id).classList.remove('active'));
 }
 function handleVoiceCmd(t){
+  const txt = t.trim();
+  // Check dev extensions
+  if(typeof getDevAnswer==='function'){const a=getDevAnswer(txt);if(a){speak(a,5000);return;}}
+  // Check user learner
+  if(typeof UserLearner!=='undefined'){const l=UserLearner.extract(txt);if(l){speak(l.msg,4000);if(l.key==='name')document.title='Anees — '+l.val;return;}}
+  // Check user answers
+  if(typeof findUserAnswer==='function'){const a=findUserAnswer(txt);if(a){speak(a,5000);return;}}
+  // Built-in commands
   if(t.includes('ارقص')||t.includes('رقص'))danceRobot();
   else if(t.includes('سلم')||t.includes('لوح')||t.includes('مرحبا'))waveRobot();
   else if(t.includes('دور')||t.includes('لف'))spinRobot();
@@ -1660,22 +1676,20 @@ let chatHistory = [];
 let chatMicRec = null;
 let chatMicActive = false;
 
-// Load saved chat
-(function loadSavedChat(){
+// Load saved chat - deferred so all functions are defined
+function loadSavedChat(){
   try {
     const saved = localStorage.getItem(CHAT_KEY);
     if (saved) {
       chatHistory = JSON.parse(saved);
-      // Restore messages to DOM (last 30)
       const msgs = chatHistory.slice(-30);
       msgs.forEach(m => appendChatMsg(m.role, m.text, m.time, false));
       scrollChat();
     }
   } catch(e) {}
-  // Set init time
   const el = document.getElementById('initChatTime');
   if(el) el.textContent = now();
-})();
+}
 
 function now(){
   return new Date().toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});
@@ -1788,8 +1802,7 @@ function clearChat(){
 
 function saveChat(){
   if(!chatHistory.length){ toast('لا توجد محادثة للحفظ'); return; }
-  const lines = chatHistory.map(m => `[${m.time}] ${m.role==='bot'?'Anees':'أنت'}: ${m.text}`).join('
-');
+  const lines = chatHistory.map(m => `[${m.time}] ${m.role==='bot'?'Anees':'أنت'}: ${m.text}`).join('\n');
   const blob = new Blob([lines], {type:'text/plain;charset=utf-8'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1800,8 +1813,7 @@ function saveChat(){
 
 function shareChatWeb(){
   if(!chatHistory.length){ toast('لا توجد محادثة للمشاركة'); return; }
-  const text = chatHistory.slice(-10).map(m => `${m.role==='bot'?'Anees 🤖':'أنا'}: ${m.text}`).join('
-');
+  const text = chatHistory.slice(-10).map(m => `${m.role==='bot'?'Anees 🤖':'أنا'}: ${m.text}`).join('\n');
   if(navigator.share){
     navigator.share({title:'محادثة مع Anees', text}).catch(()=>{});
   } else if(navigator.clipboard){
@@ -1920,73 +1932,25 @@ function initRobot() {
   }
 }
 
-// ═══════════════════════════════════════════════════════
-//  handleVoiceCmd — ترتيب الأولويات:
-//  1. أسئلة المطوّر  (developer.js — للقراءة فقط)
-//  2. تعلّم معلومة جديدة من المستخدم (user.js — قابل للكتابة)
-//  3. أسئلة المستخدم عن نفسه (user.js)
-//  4. الأوامر الأصلية للروبوت
-// ═══════════════════════════════════════════════════════
-const _origVoiceCmd = handleVoiceCmd;
-function handleVoiceCmd(t) {
-  const txt = t.trim();
+// handleVoiceCmd extensions merged into original function
 
-  // 1) أسئلة المطوّر
-  if (typeof getDevAnswer === 'function') {
-    const devAns = getDevAnswer(txt);
-    if (devAns) { speak(devAns, 5000); return; }
-  }
-
-  // 2) تعلّم معلومة جديدة من كلام المستخدم
-  if (typeof UserLearner !== 'undefined') {
-    const learned = UserLearner.extract(txt);
-    if (learned) {
-      speak(learned.msg, 4000);
-      // لو تعلّم الاسم، حدّث عنوان الصفحة
-      if (learned.key === 'name') {
-        document.title = 'Anees — ' + learned.val;
-      }
-      return;
-    }
-  }
-
-  // 3) أسئلة المستخدم عن بياناته المحفوظة
-  if (typeof findUserAnswer === 'function') {
-    const userAns = findUserAnswer(txt);
-    if (userAns) { speak(userAns, 5000); return; }
-  }
-
-  // 4) الأوامر الأصلية
-  _origVoiceCmd(t);
-}
-
-// ═══════════════════════════════════════════════════════
-//  setEmotion — ردود شخصية باسم المستخدم
-// ═══════════════════════════════════════════════════════
-const _origSetEmotion = setEmotion;
-function setEmotion(emotion) {
-  _origSetEmotion(emotion);
-
-  if (typeof UserDB === 'undefined') return;
-  const uName = UserDB.get('name');
-  if (!uName) return;
-
-  const personalMap = {
-    happy:  `شايف إنك مبسوط يا ${uName}! ده بيسعدني 🎉`,
-    sad:    `متضيقش يا ${uName}، أنت أقوى من أي مشكلة 💪`,
-    sleepy: `تعبان يا ${uName}؟ خد استراحة وارجع 😴`,
-  };
-
-  if (personalMap[emotion] && emotion !== S._lastPersonalEmotion) {
-    S._lastPersonalEmotion = emotion;
-    setTimeout(() => speak(personalMap[emotion], 4000), 3200);
-  }
-}
+// setEmotion personal extensions handled inside original
 
 // ═══════════════════════════════════════════════════════
 //  START
 // ═══════════════════════════════════════════════════════
-initRobot();
+// Wait for DOM to be ready then init everything
+(function(){
+  function boot(){
+    loadSavedChat();
+    initRobot();
+  }
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
 </script>
 </body>
 </html>
